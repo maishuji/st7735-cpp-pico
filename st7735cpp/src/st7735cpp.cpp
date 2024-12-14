@@ -2,6 +2,8 @@
 
 #include <pico/stdlib.h>
 #include <hardware/spi.h>
+#include <unordered_map>
+#include <array>
 
 namespace
 {
@@ -16,6 +18,9 @@ namespace
     const uint8_t PIN_MOSI = 15;
 
     // A simple 5x8 font for the character "C" (example binary representation)
+    constexpr int CHAR_WIDTH = 5;
+    constexpr int CHAR_HEIGHT = 8;
+    using CharBitmap = std::array<uint8_t, CHAR_HEIGHT>;
     const uint8_t font_C[8] = {
         0x3E, // 00111110
         0x63, // 01100011
@@ -26,6 +31,9 @@ namespace
         0x3E, // 00111110
         0x00  // Padding
     };
+
+    std::unordered_map<char, CharBitmap> map_char_to_data = {
+        {'C', {0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110, 0b00000}}};
 }
 
 namespace st7735cpp
@@ -71,6 +79,19 @@ namespace st7735cpp
         // Initialization command
     }
 
+    void TftScreen::fill(uint16_t color)
+    {
+        uint16_t w = 128;
+        uint16_t h = 160;
+        set_address_window(Rect<uint16_t>{0, 0, w, h});
+        uint16_t colorBuffer[w * h];
+        for (int i = 0; i < w * h; i++)
+        {
+            colorBuffer[i] = color;
+        }
+        write_data((uint8_t *)colorBuffer, sizeof(colorBuffer));
+    }
+
     void TftScreen::reset()
     {
         gpio_put(PIN_RESET, 0); // Reset the screen
@@ -82,7 +103,7 @@ namespace st7735cpp
     void TftScreen::set_address_window(Rect<uint16_t> rect)
     {
         write_command(0x2A); // CASET (Column Address Set)
-        uint8_t data_x[4] = {static_cast<uint8_t>( (rect.x >> 8) & 0xFF),
+        uint8_t data_x[4] = {static_cast<uint8_t>((rect.x >> 8) & 0xFF),
                              static_cast<uint8_t>(rect.x & 0xFF),
                              static_cast<uint8_t>(((rect.x + rect.w - 1) >> 8) & 0xFF),
                              static_cast<uint8_t>((rect.x + rect.w - 1) & 0xFF)};
@@ -99,19 +120,23 @@ namespace st7735cpp
     }
 
     // Draw a single character using the font array
-    void TftScreen::draw_char(uint16_t x, uint16_t y, const uint8_t *char_data, uint16_t color, uint16_t bg)
+    void TftScreen::draw_char(uint16_t x, uint16_t y, const char letter, uint16_t color, uint16_t bg)
     {
-        set_address_window(Rect<uint16_t>{x, y, 5, 8}); // 5x8 character
-
-        for (uint8_t row = 0; row < 8; row++)
+        if (auto it = map_char_to_data.find(letter); it != map_char_to_data.end())
         {
-            uint8_t pixels = char_data[row];
-            for (uint8_t col = 0; col < 5; col++)
+            auto data = it->second;
+            set_address_window(Rect<uint16_t>{x, y, 5, 8}); // 5x8 character
+
+            for (uint8_t row = 0; row < 8; row++)
             {
-                uint16_t pixel_color = (pixels & (1 << (4 - col))) ? color : bg;
-                uint8_t pixel_data[2] = {static_cast<uint8_t>(pixel_color >> 8),
-                                         static_cast<uint8_t>(pixel_color & 0xFF)};
-                write_data(pixel_data, 2);
+                uint8_t pixels = data[row];
+                for (uint8_t col = 0; col < 5; col++)
+                {
+                    uint16_t pixel_color = (pixels & (1 << (4 - col))) ? color : bg;
+                    uint8_t pixel_data[2] = {static_cast<uint8_t>(pixel_color >> 8),
+                                             static_cast<uint8_t>(pixel_color & 0xFF)};
+                    write_data(pixel_data, 2);
+                }
             }
         }
     }
